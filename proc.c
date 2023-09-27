@@ -89,6 +89,8 @@ found:
   p->state = EMBRYO;
   p->pid = nextpid++;
 
+  p->ctime = ticks;
+
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -322,7 +324,6 @@ wait(void)
 void
 scheduler(void)
 {
-  struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
   
@@ -332,26 +333,37 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    struct proc *minP = 0, *p = 0;
+    // Loop over process table looking for process to run.
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if(p->state != RUNNABLE)
+            continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+        // ignore init and sh processes from FCFS
+        if(minP != 0) {
+            // here I find the process with the lowest creation time (the first one that was created)
+            if(p->ctime < minP->ctime)
+                minP = p;
+        }
+        else
+            minP = p;
+    }
+    if(minP != 0) {
+        // Switch to chosen process.  It is the process's job
+        // to release ptable.lock and then reacquire it
+        // before jumping back to us.
+        c->proc = minP;
+        switchuvm(minP);
+        minP->state = RUNNING;
+        cprintf("cpu %d, pname %s, pid %d\n", c->apicid, minP->name, minP->pid);
+        swtch(&(c->scheduler), minP->context);
+        switchkvm();
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
     }
     release(&ptable.lock);
-
   }
 }
 
